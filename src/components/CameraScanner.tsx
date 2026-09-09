@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { Camera, SwitchCamera, Sparkles, RefreshCw, AlertCircle } from 'lucide-react';
+import { Camera, SwitchCamera, Sparkles, AlertCircle } from 'lucide-react';
 import { SAMPLE_MEDICATIONS, SampleMedication } from '../data/sampleLabels';
 import { TextSize } from '../types';
 import { seniorAudio } from '../utils/audioPlayer';
@@ -19,42 +19,161 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const nativeCameraInputRef = useRef<HTMLInputElement>(null);
 
   const [stream, setStream] = useState<MediaStream | null>(null);
-  const [cameraError, setCameraError] = useState<string | null>(null);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean>(false);
+  const [activeCameraLabel, setActiveCameraLabel] = useState<string>('Kamera Belakang');
 
-  // Memulakan aliran kamera
-  const startCamera = async (facing: 'environment' | 'user') => {
-    setCameraError(null);
+  // Mengesan ID peranti kamera belakang secara terus jika disokong
+  const findRearCameraDeviceId = async (): Promise<string | null> => {
+    try {
+      if (!navigator.mediaDevices?.enumerateDevices) return null;
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoInputs = devices.filter((d) => d.kind === 'videoinput');
+
+      if (videoInputs.length === 0) return null;
+
+      // Cari label perkataan seperti back, rear, environment, belakang, atau sensor utama
+      const explicitRear = videoInputs.find((d) =>
+        /back|rear|environment|belakang|main|facing back|camera 0/i.test(d.label)
+      );
+      if (explicitRear && explicitRear.deviceId) {
+        return explicitRear.deviceId;
+      }
+
+      // Jika ada 2 kamera dan satu adalah 'front/selfie', pilih yang bukan hadapan
+      if (videoInputs.length >= 2) {
+        const nonFront = videoInputs.find(
+          (d) => d.label && !/front|user|selfie|depan|face/i.test(d.label)
+        );
+        if (nonFront && nonFront.deviceId) {
+          return nonFront.deviceId;
+        }
+      }
+    } catch {
+      // Abaikan ralat enumerasi jika pelayar menyekat
+    }
+    return null;
+  };
+
+  // Memulakan aliran kamera dengan pengesanan langsung kamera belakang
+  const startCamera = async (targetFacing: 'environment' | 'user') => {
     try {
       if (stream) {
         stream.getTracks().forEach((track) => track.stop());
       }
 
-      const constraints: MediaStreamConstraints = {
-        video: {
-          facingMode: facing,
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-        audio: false,
-      };
+      let newStream: MediaStream | null = null;
 
-      const newStream = await navigator.mediaDevices.getUserMedia(constraints);
-      setStream(newStream);
-      setHasCameraPermission(true);
+      // 1. Jika sasaran adalah kamera belakang ('environment'), cuba kesan peranti fizikal belakang dahulu
+      if (targetFacing === 'environment') {
+        const rearDeviceId = await findRearCameraDeviceId();
+        if (rearDeviceId) {
+          try {
+            newStream = await navigator.mediaDevices.getUserMedia({
+              video: {
+                deviceId: { exact: rearDeviceId },
+                width: { ideal: 1920 },
+                height: { ideal: 1080 },
+              },
+              audio: false,
+            });
+          } catch (devErr) {
+            console.log('Percubaan deviceId khusus tidak berjaya, mencuba facingMode...');
+          }
+        }
+      }
 
-      if (videoRef.current) {
-        videoRef.current.srcObject = newStream;
-        await videoRef.current.play();
+      // 2. Jika belum dapat, paksa perkakasan kamera belakang dengan { exact: 'environment' }
+      if (!newStream && targetFacing === 'environment') {
+        try {
+          newStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              facingMode: { exact: 'environment' },
+              width: { ideal: 1920 },
+              height: { ideal: 1080 },
+            },
+            audio: false,
+          });
+        } catch (exactErr) {
+          console.log('exact: environment tidak disokong pada peranti ini, menggunakan mod ideal');
+        }
+      }
+
+      // 3. Sandaran kepada standard ideal facingMode
+      if (!newStream) {
+        try {
+          newStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              facingMode: { ideal: targetFacing },
+              width: { ideal: 1920 },
+              height: { ideal: 1080 },
+            },
+            audio: false,
+          });
+        } catch (idealErr) {
+          // 4. Sandaran terakhir: buka mana-mana video stream yang ada
+          newStream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false,
+          });
+        }
+      }
+
+      if (newStream) {
+        setStream(newStream);
+        setHasCameraPermission(true);
+
+        const track = newStream.getVideoTracks()[0];
+        if (track) {
+          const trackLabel = (track.label || '').toLowerCase();
+          const isFront = /front|user|selfie|depan/.test(trackLabel);
+          const isRear = /back|rear|environment|belakang|main|facing back/.test(trackLabel);
+
+          // Jika sasaran adalah belakang tetapi pelayar memberikan kamera depan kerana kebenaran belum ada sebelumnya,
+          // kini kebenaran sudah diberikan, periksa semula peranti dan tukar terus ke kamera belakang!
+          if (targetFacing === 'environment' && isFront) {
+            const betterRearId = await findRearCameraDeviceId();
+            if (betterRearId && betterRearId !== track.getSettings().deviceId) {
+              try {
+                const autoRearStream = await navigator.mediaDevices.getUserMedia({
+                  video: {
+                    deviceId: { exact: betterRearId },
+                    width: { ideal: 1920 },
+                    height: { ideal: 1080 },
+                  },
+                  audio: false,
+                });
+                track.stop();
+                newStream = autoRearStream;
+                setStream(autoRearStream);
+                setActiveCameraLabel('Kamera Belakang (Dikesan)');
+              } catch {
+                // Kekalkan stream sedia ada jika pertukaran automatik disekat
+              }
+            }
+          } else {
+            setActiveCameraLabel(
+              isRear
+                ? 'Kamera Belakang (Aktif)'
+                : isFront
+                ? 'Kamera Hadapan'
+                : targetFacing === 'environment'
+                ? 'Kamera Belakang (Aktif)'
+                : 'Kamera Hadapan'
+            );
+          }
+        }
+
+        if (videoRef.current) {
+          videoRef.current.srcObject = newStream;
+          await videoRef.current.play();
+        }
       }
     } catch (err: any) {
-      console.warn('Camera access error:', err);
-      setCameraError(
-        'Kamera tidak dapat diakses. Sila pastikan kebenaran kamera dibenarkan pada pelayar atau cuba contoh ubat di bawah.'
-      );
+      console.log('Kamera live tidak aktif, mod tangkapan terus peranti diaktifkan.');
       setHasCameraPermission(false);
     }
   };
@@ -69,28 +188,50 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({
     };
   }, [facingMode]);
 
-  // Tukar kamera depan / belakang
+  // Tukar kamera depan / belakang secara manual jika diperlukan
   const toggleCamera = () => {
     const nextFacing = facingMode === 'environment' ? 'user' : 'environment';
     setFacingMode(nextFacing);
-    seniorAudio.announcePrompt('Kamera ditukar');
+    seniorAudio.announcePrompt(
+      nextFacing === 'environment' ? 'Kamera belakang diaktifkan' : 'Kamera hadapan diaktifkan'
+    );
   };
 
-  // Tangkap gambar daripada paparan video
-  const takeSnapshot = () => {
-    if (!videoRef.current) return;
-    const video = videoRef.current;
-    const canvas = canvasRef.current || document.createElement('canvas');
-    canvas.width = video.videoWidth || 1280;
-    canvas.height = video.videoHeight || 720;
+  // Tangkap gambar daripada paparan video jika aktif, atau terus buka kamera peranti
+  const handleSnapClick = () => {
+    if (hasCameraPermission && videoRef.current) {
+      const video = videoRef.current;
+      const canvas = canvasRef.current || document.createElement('canvas');
+      canvas.width = video.videoWidth || 1280;
+      canvas.height = video.videoHeight || 720;
 
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    const base64 = canvas.toDataURL('image/jpeg', 0.9);
-    seniorAudio.announcePrompt('Gambar label berjaya diambil. Sedang membaca maklumat ubat anda.');
-    onImageSelected(base64, 'camera');
+      const base64 = canvas.toDataURL('image/jpeg', 0.9);
+      seniorAudio.announcePrompt('Gambar label berjaya diambil. Sedang membaca maklumat ubat anda.');
+      onImageSelected(base64, 'camera');
+    } else {
+      // Buka kamera peranti belakang terus tanpa sekatan kebenaran
+      nativeCameraInputRef.current?.click();
+    }
+  };
+
+  // Tangkap gambar daripada kamera terus peranti
+  const handleNativeCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64 = event.target?.result as string;
+      if (base64) {
+        seniorAudio.announcePrompt('Gambar label ubat berjaya diambil. Sedang membaca maklumat.');
+        onImageSelected(base64, 'camera');
+      }
+    };
+    reader.readAsDataURL(file);
   };
 
   // Pilih contoh ubat
@@ -169,32 +310,59 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({
                 </div>
               </div>
 
+              {/* Status Pengesanan Kamera Belakang Peranti */}
+              <div
+                id="active-camera-indicator"
+                className="absolute top-4 left-4 bg-black/75 backdrop-blur-sm text-white px-3 py-1.5 rounded-xl border border-white/20 text-xs sm:text-sm font-semibold flex items-center gap-2 shadow-md pointer-events-none z-10"
+              >
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>{activeCameraLabel}</span>
+              </div>
+
               {/* Butang Tukar Kamera */}
               <button
                 id="flip-camera-button"
                 onClick={toggleCamera}
                 type="button"
-                className="absolute top-4 right-4 bg-black/70 hover:bg-black text-white p-3 rounded-2xl backdrop-blur-sm border border-white/30 shadow-md transition-transform active:scale-95"
+                className="absolute top-4 right-4 bg-black/70 hover:bg-black text-white p-3 rounded-2xl backdrop-blur-sm border border-white/30 shadow-md transition-transform active:scale-95 z-10"
                 title="Tukar Kamera (Depan / Belakang)"
                 aria-label="Tukar Kamera"
               >
                 <SwitchCamera className="w-6 h-6" />
               </button>
+
+              {/* Butang Shutter Kamera Pada Lensa */}
+              <div className="absolute bottom-5 inset-x-0 flex justify-center pointer-events-none z-10">
+                <button
+                  type="button"
+                  id="camera-shutter-button"
+                  onClick={handleSnapClick}
+                  disabled={isLoading}
+                  className="pointer-events-auto p-4 rounded-full bg-white/95 hover:bg-white text-teal-800 shadow-2xl border-4 border-teal-500 transition-all active:scale-90 hover:scale-105"
+                  aria-label="Imbas Label Ubat"
+                  title="Imbas Label Ubat"
+                >
+                  <Camera className="w-8 h-8 text-teal-700" />
+                </button>
+              </div>
             </>
           ) : (
             <div className="text-center p-8 max-w-md">
-              <Camera className="w-16 h-16 mx-auto mb-4 text-slate-500" />
-              <p className="text-lg font-bold text-white mb-2">Kamera Tidak Aktif atau Disekat</p>
+              <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-teal-900/40 border border-teal-500/30 flex items-center justify-center text-teal-400">
+                <Camera className="w-10 h-10" />
+              </div>
+              <p className="text-xl font-bold text-white mb-2">Sedia Mengimbas Label Ubat</p>
               <p className="text-sm text-slate-300 mb-6">
-                {cameraError ||
-                  'Sila berikan kebenaran kamera pada pelayar anda untuk mengimbas label botol ubat.'}
+                Tekan butang di bawah untuk membuka kamera belakang peranti anda bagi mengimbas label ubat.
               </p>
               <button
-                onClick={() => startCamera(facingMode)}
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold transition-all"
+                type="button"
+                id="open-device-camera-button"
+                onClick={() => nativeCameraInputRef.current?.click()}
+                className="inline-flex items-center gap-2.5 px-6 py-3.5 rounded-2xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-base shadow-lg transition-all active:scale-95"
               >
-                <RefreshCw className="w-5 h-5" />
-                Cuba Buka Kamera Semula
+                <Camera className="w-5 h-5" />
+                Buka Kamera Sekarang
               </button>
             </div>
           )}
@@ -210,33 +378,17 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({
             </div>
           )}
         </div>
-
-        {/* Bar Alat Kawalan Tangkapan Gambar */}
-        <div
-          className={`p-5 sm:p-6 border-t flex items-center justify-center ${
-            highContrast ? 'bg-slate-950 border-yellow-400' : 'bg-slate-50 border-slate-200'
-          }`}
-        >
-          {/* Butang Tangkap Gambar Utama (Besar & Jelas untuk Warga Emas) */}
-          <button
-            id="snap-label-button"
-            onClick={takeSnapshot}
-            disabled={!hasCameraPermission || isLoading}
-            className={`w-full sm:w-auto min-w-[280px] py-4 sm:py-5 px-8 rounded-2xl font-bold flex items-center justify-center gap-3 text-lg sm:text-xl shadow-lg transition-all transform active:scale-98 ${
-              !hasCameraPermission || isLoading
-                ? 'opacity-50 cursor-not-allowed bg-gray-400 text-gray-200'
-                : highContrast
-                ? 'bg-yellow-400 text-black hover:bg-yellow-300 border-2 border-white'
-                : 'bg-teal-600 hover:bg-teal-700 text-white shadow-teal-700/20'
-            }`}
-          >
-            <Camera className="w-7 h-7" />
-            <span>AMBIL GAMBAR SEKARANG</span>
-          </button>
-        </div>
       </div>
 
       <canvas ref={canvasRef} className="hidden" />
+      <input
+        ref={nativeCameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={handleNativeCapture}
+      />
 
       {/* Contoh Label Ubat Malaysia untuk Ujian Pantas */}
       <div

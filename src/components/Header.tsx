@@ -33,13 +33,16 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Jenama & Fungsi Aplikasi */}
         <div className="flex items-center gap-3 text-center sm:text-left">
           <div
-            className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${
-              highContrast
-                ? 'bg-yellow-400 text-black'
-                : 'bg-teal-600 text-white shadow-sm'
+            className={`w-12 h-12 rounded-2xl overflow-hidden shrink-0 shadow-md border-2 transition-transform hover:scale-105 ${
+              highContrast ? 'border-yellow-400 bg-yellow-400/20' : 'border-blue-200/80 bg-blue-600'
             }`}
           >
-            <Volume2 className="w-7 h-7" aria-hidden="true" />
+            <img
+              src="/app-icon.png"
+              alt="Easy Label Logo"
+              referrerPolicy="no-referrer"
+              className="w-full h-full object-cover"
+            />
           </div>
           <div>
             <div className="flex items-center gap-2 flex-wrap justify-center sm:justify-start">

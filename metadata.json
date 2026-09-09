@@ -1,9 +1,7 @@
 {
   "name": "Easy Label",
   "description": "Easy Label - Aplikasi penukar label ubat kepada suara untuk warga emas. Established 2026 by Inovasi Farmasi PKD Tanah Merah.",
-  "requestFramePermissions": [
-    "camera"
-  ],
+  "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
   ]

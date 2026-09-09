@@ -268,6 +268,12 @@ export default function App() {
       >
         <div className="max-w-2xl mx-auto space-y-2">
           <div className="flex items-center justify-center gap-2 flex-wrap text-sm font-semibold">
+            <img
+              src="/app-icon.png"
+              alt="Easy Label Logo"
+              referrerPolicy="no-referrer"
+              className="w-5 h-5 rounded-md inline-block shadow-xs"
+            />
             <span className={highContrast ? 'text-yellow-300' : 'text-slate-900'}>Easy Label</span>
             <span>&bull;</span>
             <span>Established 2026 by <strong>Inovasi Farmasi PKD Tanah Merah</strong></span>
