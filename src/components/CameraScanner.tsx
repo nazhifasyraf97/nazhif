@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { Camera, SwitchCamera, Upload, Sparkles, RefreshCw, AlertCircle } from 'lucide-react';
+import { Camera, SwitchCamera, Sparkles, RefreshCw, AlertCircle } from 'lucide-react';
 import { SAMPLE_MEDICATIONS, SampleMedication } from '../data/sampleLabels';
 import { TextSize } from '../types';
 import { seniorAudio } from '../utils/audioPlayer';
@@ -19,13 +19,11 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean>(false);
-  const [dragOver, setDragOver] = useState<boolean>(false);
 
   // Memulakan aliran kamera
   const startCamera = async (facing: 'environment' | 'user') => {
@@ -55,7 +53,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({
     } catch (err: any) {
       console.warn('Camera access error:', err);
       setCameraError(
-        'Kamera tidak dapat diakses. Anda boleh muat naik atau pilih fail gambar menggunakan butang di bawah.'
+        'Kamera tidak dapat diakses. Sila pastikan kebenaran kamera dibenarkan pada pelayar atau cuba contoh ubat di bawah.'
       );
       setHasCameraPermission(false);
     }
@@ -63,6 +61,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({
 
   useEffect(() => {
     startCamera(facingMode);
+
     return () => {
       if (stream) {
         stream.getTracks().forEach((track) => track.stop());
@@ -94,40 +93,6 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({
     onImageSelected(base64, 'camera');
   };
 
-  // Muat naik fail gambar
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const base64 = event.target?.result as string;
-      if (base64) {
-        seniorAudio.announcePrompt('Gambar berjaya dimuat naik. Sedang membaca maklumat label.');
-        onImageSelected(base64, 'upload');
-      }
-    };
-    reader.readAsDataURL(file);
-  };
-
-  // Tarik & Lepas (Drag & Drop)
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setDragOver(false);
-    const file = e.dataTransfer.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const base64 = event.target?.result as string;
-      if (base64) {
-        seniorAudio.announcePrompt('Gambar berjaya dimuat naik. Sedang membaca maklumat label.');
-        onImageSelected(base64, 'upload');
-      }
-    };
-    reader.readAsDataURL(file);
-  };
-
   // Pilih contoh ubat
   const handleSelectSample = (sample: SampleMedication) => {
     seniorAudio.announcePrompt(`Contoh ubat ${sample.name} dipilih. Sedang membaca maklumat.`);
@@ -143,13 +108,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({
           highContrast
             ? 'bg-black border-yellow-400 text-white'
             : 'bg-white border-slate-200 text-slate-800'
-        } ${dragOver ? 'ring-4 ring-teal-400' : ''}`}
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragOver(true);
-        }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={handleDrop}
+        }`}
       >
         {/* Jalur Panduan Langkah 1 */}
         <div
@@ -228,7 +187,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({
               <p className="text-lg font-bold text-white mb-2">Kamera Tidak Aktif atau Disekat</p>
               <p className="text-sm text-slate-300 mb-6">
                 {cameraError ||
-                  'Sila berikan kebenaran kamera pada pelayar anda atau pilih gambar ubat daripada peranti anda.'}
+                  'Sila berikan kebenaran kamera pada pelayar anda untuk mengimbas label botol ubat.'}
               </p>
               <button
                 onClick={() => startCamera(facingMode)}
@@ -254,7 +213,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({
 
         {/* Bar Alat Kawalan Tangkapan Gambar */}
         <div
-          className={`p-5 sm:p-6 border-t flex flex-col sm:flex-row items-center justify-center gap-4 ${
+          className={`p-5 sm:p-6 border-t flex items-center justify-center ${
             highContrast ? 'bg-slate-950 border-yellow-400' : 'bg-slate-50 border-slate-200'
           }`}
         >
@@ -263,7 +222,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({
             id="snap-label-button"
             onClick={takeSnapshot}
             disabled={!hasCameraPermission || isLoading}
-            className={`w-full sm:w-auto min-w-[260px] py-4 sm:py-5 px-8 rounded-2xl font-bold flex items-center justify-center gap-3 text-lg sm:text-xl shadow-lg transition-all transform active:scale-98 ${
+            className={`w-full sm:w-auto min-w-[280px] py-4 sm:py-5 px-8 rounded-2xl font-bold flex items-center justify-center gap-3 text-lg sm:text-xl shadow-lg transition-all transform active:scale-98 ${
               !hasCameraPermission || isLoading
                 ? 'opacity-50 cursor-not-allowed bg-gray-400 text-gray-200'
                 : highContrast
@@ -274,30 +233,6 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({
             <Camera className="w-7 h-7" />
             <span>AMBIL GAMBAR SEKARANG</span>
           </button>
-
-          {/* Butang Muat Naik Fail Gambar */}
-          <button
-            id="upload-photo-button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isLoading}
-            className={`w-full sm:w-auto py-4 sm:py-5 px-6 rounded-2xl font-semibold flex items-center justify-center gap-2.5 text-base sm:text-lg border-2 transition-colors ${
-              highContrast
-                ? 'border-yellow-400 text-yellow-300 hover:bg-yellow-400/20'
-                : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100'
-            }`}
-          >
-            <Upload className="w-5 h-5" />
-            <span>Muat Naik Gambar Fail</span>
-          </button>
-
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={handleFileChange}
-          />
         </div>
       </div>
 
